@@ -36,6 +36,7 @@ from llava.model import *
 from llava.mm_utils import tokenizer_image_token
 
 from PIL import Image
+from torch.utils.data import DataLoader
 
 
 local_rank = None
@@ -664,7 +665,7 @@ class LazySupervisedDataset(Dataset):
         super(LazySupervisedDataset, self).__init__()
         list_data_dict = json.load(open(data_path, "r"))
 
-        rank0_print("Formatting inputs...Skip in lazy mode")
+        rank0_print("Formatting inputs......Skip in lazy mode")
         self.tokenizer = tokenizer
         self.list_data_dict = list_data_dict
         self.data_args = data_args
@@ -872,7 +873,7 @@ def train(attn_implementation=None):
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        rank0_print("Adding LoRA adapters...")
+        rank0_print("Adding LoRA adapters......")
         model = get_peft_model(model, lora_config)
 
     if 'mpt' in model_args.model_name_or_path:
@@ -958,6 +959,8 @@ def train(attn_implementation=None):
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
+
+
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,

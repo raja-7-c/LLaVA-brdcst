@@ -9,10 +9,11 @@ class CLIPVisionTower(nn.Module):
         super().__init__()
 
         self.is_loaded = False
-
+  
         self.vision_tower_name = vision_tower
         self.select_layer = args.mm_vision_select_layer
         self.select_feature = getattr(args, 'mm_vision_select_feature', 'patch')
+        self.select_cls_feature = getattr(args, 'mm_vision_select_cls_feature', 'img_cls')
 
         if not delay_load:
             self.load_model()
@@ -41,20 +42,38 @@ class CLIPVisionTower(nn.Module):
         else:
             raise ValueError(f'Unexpected select feature: {self.select_feature}')
         return image_features
+    
+    def cls_feature_select(self, image_forward_outs):
+        cls_image_features = image_forward_outs.hidden_states[-1]
+        if self.select_cls_feature == 'img_cls':
+            cls_image_features = cls_image_features[:, :1]
+            if cls_image_features.dim() == 2 and cls_image_features.size(0) == 1:
+                cls_image_features = cls_image_features.squeeze(0)
+        else:
+            raise ValueError(f'Unexpected select feature: {self.select_cls_feature}')
+        return cls_image_features
 
     @torch.no_grad()
     def forward(self, images):
         if type(images) is list:
             image_features = []
+            image_cls_features = []
             for image in images:
                 image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
+                image_cls_feature = self.cls_feature_select(image_forward_out).to(image.dtype)
+                if image_cls_features.dim() == 2 and image_cls_features.size(0) == 1:
+                   image_cls_features = image_cls_features.squeeze(0)
+                image_cls_features.append(image_cls_feature)
         else:
             image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
             image_features = self.feature_select(image_forward_outs).to(images.dtype)
+            image_cls_features = self.cls_feature_select(image_forward_outs).to(images.dtype)
+            if image_cls_features.dim() == 3 and image_cls_features.size(1) == 1:
+                   image_cls_features = image_cls_features.squeeze(1)
 
-        return image_features
+        return image_features, image_cls_features
 
     @property
     def dummy_feature(self):
@@ -128,19 +147,23 @@ class CLIPVisionTowerS2(CLIPVisionTower):
     def forward_feature(self, images):
         image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
         image_features = self.feature_select(image_forward_outs).to(images.dtype)
-        return image_features
+        image_cls_features = self.cls_feature_select(image_forward_outs).to(images.dtype)
+        return image_features, image_cls_features
 
     @torch.no_grad()
     def forward(self, images):
         if type(images) is list:
             image_features = []
+            image_cls_features = []
             for image in images:
-                image_feature = self.multiscale_forward(self.forward_feature, image.unsqueeze(0), img_sizes=self.s2_scales, max_split_size=self.s2_split_size)
+                image_feature, image_cls_feature = self.multiscale_forward(self.forward_feature, image.unsqueeze(0), img_sizes=self.s2_scales, max_split_size=self.s2_split_size)
                 image_features.append(image_feature)
+                image_cls_features.append(image_cls_feature)
         else:
             image_features = self.multiscale_forward(self.forward_feature, images, img_sizes=self.s2_scales, max_split_size=self.s2_split_size)
+            image_cls_features = self.multiscale_forward(self.forward_feature, images, img_sizes=self.s2_scales, max_split_size=self.s2_split_size)
 
-        return image_features
+        return image_features, image_cls_features
 
     @property
     def hidden_size(self):
