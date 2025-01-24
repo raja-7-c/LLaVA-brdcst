@@ -12,8 +12,14 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
+# Load model directly
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("lmsys/vicuna-7b-v1.5")
 
 from abc import ABC, abstractmethod
+
+from sentence_transformers import SentenceTransformer
+SentenceTransformer_model = SentenceTransformer("Alibaba-NLP/gte-large-en-v1.5", trust_remote_code=True)
 
 import torch
 import torch.nn as nn
@@ -24,6 +30,8 @@ from .multimodal_projector.builder import build_vision_projector
 from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 from llava.mm_utils import get_anyres_image_grid_shape
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class LlavaMetaModel:
@@ -139,6 +147,10 @@ class LlavaMetaForCausalLM(ABC):
 
     def encode_images(self, images):
         image_features, image_cls_features = self.get_model().get_vision_tower()(images)
+            # Check for dummy images (all zeros tensor)
+        if torch.all(images == 0):
+            # Set image_cls_features bias values to zeros
+            image_cls_features = torch.zeros_like(image_cls_features)
         image_features = self.get_model().mm_projector(image_features)
         return image_features, image_cls_features
 
@@ -147,8 +159,9 @@ class LlavaMetaForCausalLM(ABC):
         images, image_sizes=None
     ):
         vision_tower = self.get_vision_tower()
+
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, None, None
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
@@ -201,7 +214,13 @@ class LlavaMetaForCausalLM(ABC):
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
             image_features, image_cls_features = self.encode_images(images)
-            image_cls_features = image_cls_features.squeeze(1)
+
+            #print(f"image_features {image_features}")
+            #print(f"image_cls_features {image_cls_features}")
+            #print(f"image_features shape {image_features.shape}")
+            #print(f"image_cls_features shape {image_cls_features.shape}")
+
+   
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
@@ -227,9 +246,33 @@ class LlavaMetaForCausalLM(ABC):
         _input_ids = input_ids
         input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
         labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
+        # Filter out invalid token IDs (e.g., -200, 1 and 2)
+        filtered_input_ids = [
+            seq[seq > 2].tolist()  # Keep only values > 2
+            for seq in input_ids
+        ]
+        #print(filtered_input_ids[9])
+        #print("####")
+        #print(labels[9])
+        #print("####")
+        #print("####")
+        #print("####")
+        #print(filtered_input_ids[7])
+        #print("####")
+        #print(labels[7])
+        #exit()
+        # Remove padding and filter out invalid tokens while keeping alignment with labels
+        #filtered_input_ids = [
+            #seq[(seq > 2) & (lab != -100)].tolist()  # Combine both conditions using tensor operations
+            #for seq, lab in zip(input_ids, labels)
+        #]
 
+        sentence_embeddings = SentenceTransformer_model.encode(filtered_input_ids)
+        txt_cls_features = torch.tensor(sentence_embeddings).to(device)
+        
         new_input_embeds = []
-        new_input_cls_embeds = []
+        img_input_cls_embeds = []
+        #txt_input_cls_embeds = []
         new_labels = []
         cur_image_idx = 0
         for batch_idx, cur_input_ids in enumerate(input_ids):
@@ -237,10 +280,12 @@ class LlavaMetaForCausalLM(ABC):
             if num_images == 0:
                 cur_image_features = image_features[cur_image_idx]
                 cur_image_cls_features = image_cls_features[cur_image_idx]
+                #cur_txt_cls_features = txt_cls_features[cur_image_idx]
                 cur_input_embeds_1 = self.get_model().embed_tokens(cur_input_ids)
                 cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
                 new_input_embeds.append(cur_input_embeds)
-                new_input_cls_embeds.append(cur_image_cls_features)
+                img_input_cls_embeds.append(cur_image_cls_features)
+                #txt_input_cls_embeds.append(cur_txt_cls_features)
                 new_labels.append(labels[batch_idx])
                 cur_image_idx += 1
                 continue
@@ -257,6 +302,7 @@ class LlavaMetaForCausalLM(ABC):
             cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
             cur_new_input_embeds = []
             cur_new_image_cls_embeds = []
+            #cur_new_txt_cls_embeds = []
             cur_new_labels = []
 
             for i in range(num_images + 1):
@@ -278,10 +324,13 @@ class LlavaMetaForCausalLM(ABC):
             cur_new_labels = torch.cat(cur_new_labels)
 
             new_input_embeds.append(cur_new_input_embeds)
-            new_input_cls_embeds.append(cur_new_image_cls_embeds)  
+            img_input_cls_embeds.append(cur_new_image_cls_embeds)  
+            #txt_input_cls_embeds.append(cur_new_txt_cls_embeds) 
             new_labels.append(cur_new_labels)
 
-        new_input_cls_embeds = torch.stack(new_input_cls_embeds, dim=0).to(dtype=torch.float32)
+        img_input_cls_embeds = torch.stack(img_input_cls_embeds, dim=0).to(dtype=torch.float32)
+    
+        txt_input_cls_embeds = txt_cls_features
 
         # Truncate sequences to max length as image embeddings can make the sequence longer
         tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', None)
@@ -333,8 +382,8 @@ class LlavaMetaForCausalLM(ABC):
 
         if _position_ids is None:
             position_ids = None
-
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, new_input_cls_embeds
+ 
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, img_input_cls_embeds, txt_input_cls_embeds
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:

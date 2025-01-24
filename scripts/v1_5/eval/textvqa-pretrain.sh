@@ -1,7 +1,8 @@
 #!/bin/bash
 
 python -m llava.eval.model_vqa_loader \
-    --model-path /home/rkumar/LLaVA-brdcst/checkpoints/llava-v1.5-brdcst-lora-merged \
+    --model-base lmsys/vicuna-7b-v1.5 \
+    --model-path /home/rkumar/LLaVA-brdcst/checkpoints/llava-v1.5-7b-pretrain-img-txt-brdcst \
     --question-file ./playground/data/eval/textvqa/llava_textvqa_val_v051_ocr.jsonl \
     --image-folder ./playground/data/eval/textvqa/train_images \
     --answers-file ./playground/data/eval/textvqa/answers/llava-v1.5-13b.jsonl \

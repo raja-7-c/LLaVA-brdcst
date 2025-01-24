@@ -34,4 +34,5 @@ ckpts*
 # Demo
 serve_images/
 playground
-OLA-VLM
+datasets
+usefuls_resources
