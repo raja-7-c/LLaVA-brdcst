@@ -1,4 +1,5 @@
 #!/bin/bash
+# --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
  
 deepspeed --include=localhost:0 --master_port=29800 llava/train/train_mem.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
@@ -16,7 +17,7 @@ deepspeed --include=localhost:0 --master_port=29800 llava/train/train_mem.py \
     --image_aspect_ratio pad \
     --group_by_modality_length True \
     --bf16 True \
-    --output_dir ./checkpoints/llava-v1.5-7b-lora-ft-without-brdcst \
+    --output_dir ./checkpoints/llava-v1.5-7b-lora-ft-without-brdcst2 \
     --num_train_epochs 1 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 4 \

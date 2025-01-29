@@ -3,7 +3,7 @@ import glob
 import shutil
 import os
 
-input_path = "/home/rkumar/LLaVA-brdcst/checkpoints/llava-v1.5-7b-pretrain-hf"
+input_path = "/home/rkumar/LLaVA-brdcst/checkpoints/llava-v1.5-7b-pretrain-with-brdcst"
 output_path = "/home/rkumar/LLaVA-brdcst/checkpoints/llava-v1.5-projectors/"
 
 os.makedirs(output_path, exist_ok=True)

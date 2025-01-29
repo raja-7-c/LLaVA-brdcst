@@ -77,7 +77,7 @@ class BroadcastModel(nn.Module):
         kl_loss = F.kl_div(pred_scaled, target_scaled, reduction='batchmean') * (temperature ** 2)
         
         # Combine losses with weights
-        #return mse_loss + 0.5 * cosine_loss + 0.1 * kl_loss
+        #return mse_loss + 1.0 * cosine_loss + 1.0 * kl_loss
         return mse_loss
 
     def compute_broadcast_losses(self, avg_all_tokens_embeddings, avg_text_embeddings, avg_img_embeddings, 
@@ -216,8 +216,10 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         layer_states24 = layer_states[23]
 
         llm_hidden_dim = layer_states16.shape[-1]
-        txt_cls_dim = txt_input_cls_embeds.shape[-1]
-        img_cls_dim = img_input_cls_embeds.shape[-1]
+        #txt_cls_dim = txt_input_cls_embeds.shape[-1]
+        #img_cls_dim = img_input_cls_embeds.shape[-1]
+        txt_cls_dim = 1024
+        img_cls_dim = 1024
 
         # Apply mask to layer_states12
         masked_layer_states16 = layer_states16 * expanded_attention_mask  # (batch_size, sequence_length, embedding_dim)
@@ -302,11 +304,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             shift_labels = shift_labels.to(shift_logits.device)
             text_loss = loss_fct(shift_logits, shift_labels)
 
-            # First, create the model (do this once during your main model initialization)
-            self.broadcast_model = BroadcastModel(llm_hidden_dim, txt_cls_dim, img_cls_dim).to(hidden_states.device)
+        # First, create the model (do this once during your main model initialization)
+        self.broadcast_model = BroadcastModel(llm_hidden_dim, txt_cls_dim, img_cls_dim).to(hidden_states.device)
 
-            # Then when computing losses, call it like this:
-            total_broadcast_loss16, loss_dict = self.broadcast_model.compute_broadcast_losses(
+        # Then when computing losses, call it like this:
+        total_broadcast_loss16, loss_dict = self.broadcast_model.compute_broadcast_losses(
                 avg_all_tokens_embeddings16,
                 avg_text_embeddings16,
                 avg_img_embeddings16,
